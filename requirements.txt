@@ -1,0 +1,9 @@
+
+aiogram
+asyncpg
+requests
+apscheduler
+python-dotenv
+uvicorn
+aiohttp
+
