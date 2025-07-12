@@ -44,7 +44,7 @@ class UserState(StatesGroup):
 
 # Keepalive ping (every 14 minutes)
 scheduler = BackgroundScheduler()
-scheduler.add_job(lambda: requests.get(os.getenv('RENDER_EXTERNAL_URL') + '/ping'), 'interval', minutes=14)
+scheduler.add_job(lambda: requests.get("https://my-telegram-bot-98gm.onrender.com/ping"), 'interval', minutes=14)
 scheduler.start()
 
 # --- Database Operations ---
