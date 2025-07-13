@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.utils import executor
+from aiogram.utils.executor import start_webhook
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import asyncpg
 from datetime import datetime, timedelta
@@ -17,10 +17,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 logging.basicConfig(level=logging.INFO)
 
 # Bot, Dispatcher, and Storage
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_ID = int(os.getenv('ADMIN_ID'))
-TARGET_GROUP_ID = int(os.getenv('TARGET_GROUP_ID'))
-DATABASE_URL = os.getenv('DATABASE_URL')
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
+TARGET_GROUP_ID = int(os.getenv("TARGET_GROUP_ID"))
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -42,15 +42,13 @@ class UserState(StatesGroup):
     profile_complete = State()
     in_session = State()
 
-# Keepalive ping (every 14 minutes)
-scheduler = BackgroundScheduler()
-scheduler.add_job(lambda: requests.get("https://my-telegram-bot-98gm.onrender.com/ping"), 'interval', minutes=14)
-scheduler.start()
+# Keepalive ping (every 14 minutes) - This is now handled by Render's internal mechanism or external pings
+# The bot itself will not run a separate web server for ping
 
 # --- Database Operations ---
 async def create_tables():
     async with db_pool.acquire() as conn:
-        await conn.execute('''
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id BIGINT PRIMARY KEY,
                 username TEXT,
@@ -62,15 +60,15 @@ async def create_tables():
                 vip_expiry TIMESTAMP,
                 is_banned BOOLEAN DEFAULT false
             );
-        ''')
-        await conn.execute('''
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id SERIAL PRIMARY KEY,
                 user1_id BIGINT REFERENCES users(id),
                 user2_id BIGINT REFERENCES users(id),
                 start_time TIMESTAMP DEFAULT NOW()
             );
-        ''')
+        """)
 
 async def get_user(user_id):
     async with db_pool.acquire() as conn:
@@ -424,26 +422,28 @@ async def on_startup(dp):
     await create_db_pool()
     await create_tables()
     logging.info("Bot started and database connected!")
+    WEBHOOK_HOST = os.getenv("RENDER_EXTERNAL_URL")
+    WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+    WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+    await bot.set_webhook(WEBHOOK_URL)
+    logging.info(f"Webhook set to {WEBHOOK_URL}")
+
+async def on_shutdown(dp):
+    logging.warning('Shutting down..')
+    await bot.delete_webhook()
+    await dp.storage.close()
+    await dp.storage.wait_closed()
+    logging.warning('Bye!')
 
 if __name__ == '__main__':
-    executor.start_polling(dp, on_startup=on_startup, skip_updates=True)
-
-# Simple ping endpoint for Render to keep the bot alive
-from aiohttp import web
-
-async def ping_handler(request):
-    return web.Response(text="pong")
-
-app = web.Application()
-app.router.add_get('/ping', ping_handler)
-
-async def start_web_server():
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.getenv('PORT', 8080)))
-    await site.start()
-
-# Run the web server in a separate task
-asyncio.ensure_future(start_web_server())
+    start_webhook(
+        dispatcher=dp,
+        webhook_path=f"/webhook/{BOT_TOKEN}",
+        on_startup=on_startup,
+        on_shutdown=on_shutdown,
+        skip_updates=True,
+        host='0.0.0.0',
+        port=int(os.getenv('PORT', 8080))
+    )
 
 
